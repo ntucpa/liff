@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>永承 LIFF 測試（備案）</title>
+  <style>
+    body { font-family: -apple-system, "Microsoft JhengHei", sans-serif; margin: 0; padding: 16px; background: #f4f6f8; color: #1f2d3d; }
+    h1 { font-size: 20px; color: #1F3A5F; margin: 0 0 4px; }
+    .sub { font-size: 13px; color: #667; margin-bottom: 14px; }
+    .item { background: #fff; border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; display: flex; gap: 10px; align-items: flex-start; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+    .icon { font-size: 20px; width: 26px; text-align: center; flex-shrink: 0; }
+    .t { font-weight: 600; font-size: 15px; }
+    .d { font-size: 13px; color: #556; margin-top: 2px; word-break: break-all; }
+    button { width: 100%; padding: 14px; font-size: 16px; border: 0; border-radius: 10px; background: #1F3A5F; color: #fff; margin: 6px 0; }
+    button.secondary { background: #2a8c82; }
+    pre { background: #1f2d3d; color: #cfe; font-size: 11px; padding: 10px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; }
+    .summary { font-size: 16px; font-weight: 700; padding: 12px; border-radius: 10px; margin: 12px 0; text-align: center; }
+    .ok { background: #dff5e3; color: #1d6b2f; } .bad { background: #fde2e2; color: #9b1c1c; }
+  </style>
+</head>
+<body>
+  <h1>永承 LIFF 可行性測試（備案架構）</h1>
+  <div class="sub">測試完成後，請把整個畫面（含下方「技術資料」）截圖給 Claude。</div>
+
+  <div id="list"></div>
+  <div id="summary" class="summary" style="display:none"></div>
+
+  <button id="btnDrive" class="secondary" style="display:none">測試 8：用外部瀏覽器開啟 Google 雲端硬碟</button>
+  <button id="btnLogin" style="display:none">登入 LINE（僅在電腦瀏覽器測試時需要）</button>
+
+  <div class="t" style="margin-top:14px">技術資料</div>
+  <pre id="log"></pre>
+
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script>
+    // ===== 只需要修改這兩行 =====
+    var LIFF_ID = '請貼上LIFF ID';
+    var API_URL = '請貼上Apps Script網址';
+    // ============================
+
+    var tStart = Date.now();
+    var urlBeforeInit = location.href;
+    var results = {};
+    var logLines = [];
+
+    function log(k, v) { logLines.push(k + ': ' + (typeof v === 'string' ? v : JSON.stringify(v))); document.getElementById('log').textContent = logLines.join('\n'); }
+
+    var ITEMS = [
+      ['load', '1. 頁面載入（不經 Google 框架）'],
+      ['init', '2. LIFF 初始化'],
+      ['client', '3. 在 LINE App 內開啟'],
+      ['token', '4. 取得 LINE 登入身分'],
+      ['api', '5. 連線到後端（Apps Script）'],
+      ['verify', '6. 後端驗證身分'],
+      ['param', '7. 讀取連結參數（邀請連結用）']
+    ];
+    function render() {
+      var html = '';
+      ITEMS.forEach(function (it) {
+        var r = results[it[0]] || { s: 'wait', d: '測試中…' };
+        var icon = r.s === 'ok' ? '✅' : r.s === 'bad' ? '❌' : r.s === 'warn' ? '⚠️' : '⏳';
+        html += '<div class="item"><div class="icon">' + icon + '</div><div><div class="t">' + it[1] + '</div><div class="d">' + escapeHtml(r.d) + '</div></div></div>';
+      });
+      document.getElementById('list').innerHTML = html;
+    }
+    function set(key, s, d) { results[key] = { s: s, d: d }; render(); }
+    function escapeHtml(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+    var finished = false;
+    function finish() {
+      if (finished) return; finished = true;
+      var core = ['init', 'token', 'api', 'verify', 'param'];
+      var allOk = core.every(function (k) { return results[k] && results[k].s === 'ok'; });
+      var el = document.getElementById('summary');
+      el.style.display = 'block';
+      el.className = 'summary ' + (allOk ? 'ok' : 'bad');
+      el.textContent = allOk ? '核心測試全部通過 ✅ 請再按下方按鈕完成測試 8' : '有項目未通過，請截圖給 Claude 判斷';
+      log('總耗時(ms)', String(Date.now() - tStart));
+    }
+
+    function api(action, data) {
+      var body = Object.assign({ action: action }, data || {});
+      var t = Date.now();
+      return fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(body)
+      }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function (j) { j.roundTripMs = Date.now() - t; return j; });
+    }
+
+    function findToken() {
+      var found = [];
+      [['初始化前網址', urlBeforeInit], ['目前網址', location.href]].forEach(function (pair) {
+        try {
+          var q = new URL(pair[1]).searchParams;
+          if (q.get('token')) found.push(pair[0] + ' token=' + q.get('token'));
+          var st = q.get('liff.state');
+          if (st && st.indexOf('token=') >= 0) found.push(pair[0] + ' liff.state=' + st);
+        } catch (e) {}
+      });
+      return found;
+    }
+
+    render();
+    set('load', 'ok', '頁面直接由網頁空間載入');
+    log('頁面網址', location.href);
+    log('瀏覽器', navigator.userAgent);
+    log('是否在 iframe 內', String(window.self !== window.top));
+
+    var initTimer = setTimeout(function () {
+      if (!results.init) { set('init', 'bad', '超過 15 秒沒有回應'); finish(); }
+    }, 15000);
+
+    var tInit = Date.now();
+    liff.init({ liffId: LIFF_ID }).then(function () {
+      clearTimeout(initTimer);
+      set('init', 'ok', '成功（' + (Date.now() - tInit) + ' 毫秒）');
+      log('LIFF 版本', liff.getVersion());
+      log('作業系統', liff.getOS());
+      log('初始化後網址', location.href);
+
+      var inClient = liff.isInClient();
+      set('client', inClient ? 'ok' : 'warn', inClient ? '是，在 LINE App 內' : '否，在一般瀏覽器內');
+
+      var found = findToken();
+      set('param', found.length ? 'ok' : 'bad', found.length ? found.join('；') : '找不到 token=test123');
+
+      var btn = document.getElementById('btnDrive');
+      btn.style.display = 'block';
+      btn.onclick = function () {
+        if (liff.isInClient()) {
+          liff.openWindow({ url: 'https://drive.google.com/', external: true });
+        } else {
+          window.open('https://drive.google.com/', '_blank');
+        }
+      };
+
+      if (!liff.isLoggedIn()) {
+        set('token', 'bad', '尚未登入 LINE（電腦瀏覽器請按下方登入按鈕）');
+        var b = document.getElementById('btnLogin');
+        b.style.display = 'block';
+        b.onclick = function () { liff.login({ redirectUri: location.href }); };
+        set('verify', 'bad', '需先登入');
+        return pingOnly();
+      }
+      var idToken = liff.getIDToken();
+      set('token', idToken ? 'ok' : 'bad', idToken ? '已取得（內容不顯示）' : '取不到 ID Token，請確認 LIFF 的 Scope 有勾選 openid');
+
+      return api('verify', { idToken: idToken }).then(function (r) {
+        log('後端驗證結果', r);
+        set('api', 'ok', '連線成功（來回 ' + r.roundTripMs + ' 毫秒，後端處理 ' + r.serverMs + ' 毫秒）');
+        if (r.ok && r.issuerOk && r.audienceOk) {
+          set('verify', 'ok', '成功，您好 ' + r.name);
+        } else {
+          set('verify', 'bad', r.error || '驗證欄位不符（請確認 Channel ID 是否正確）');
+        }
+        finish();
+      }).catch(function (err) {
+        set('api', 'bad', '連線失敗：' + err.message + '（請確認 API_URL 與 Apps Script 部署）');
+        set('verify', 'bad', '無法驗證（後端未連線）');
+        finish();
+      });
+    }).catch(function (err) {
+      clearTimeout(initTimer);
+      set('init', 'bad', '失敗：' + (err.code || '') + ' ' + err.message);
+      log('LIFF 初始化錯誤', { code: err.code, message: err.message });
+      set('client', 'bad', '無法判斷（LIFF 未初始化）');
+      set('token', 'bad', '無法取得（LIFF 未初始化）');
+      set('verify', 'bad', '無法驗證（LIFF 未初始化）');
+      var found = findToken();
+      set('param', found.length ? 'ok' : 'bad', found.join('；') || '找不到 token=test123');
+      pingOnly();
+    });
+
+    function pingOnly() {
+      return api('ping').then(function (r) {
+        set('api', 'ok', '連線成功（來回 ' + r.roundTripMs + ' 毫秒）');
+        finish();
+      }).catch(function (err) {
+        set('api', 'bad', '連線失敗：' + err.message);
+        finish();
+      });
+    }
+  </script>
+</body>
+</html>
