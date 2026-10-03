@@ -479,6 +479,7 @@
     if (invite || page) history.replaceState({}, '', location.pathname);
     return login().then(function (d) {
       clearTimeout(slow);
+      try { sessionStorage.removeItem('yc_relogin'); } catch (e) {}
       $('firm').textContent = d.status.firmName || '';
       if (d.invite) return handleInvite(d.invite);
       if (page === 'classify') return renderClassify();
@@ -486,7 +487,11 @@
     });
   }).then(null, function (err) {
     clearTimeout(initTimeout); clearTimeout(slow);
-    if (err && err.code === 'AUTH_FAILED') { try { if (!liff.isInClient()) liff.logout(); } catch (e) {} }
+    // 電腦瀏覽器的 LINE ID Token 約 1 小時過期：自動重新登入一次（LINE App 內由 LIFF 自行更新）
+    if (err && err.code === 'AUTH_FAILED' && !liff.isInClient()) {
+      var tried = false; try { tried = sessionStorage.getItem('yc_relogin') === '1'; sessionStorage.setItem('yc_relogin', '1'); } catch (e) {}
+      if (!tried) { try { liff.logout(); } catch (e) {} liff.login({ redirectUri: location.href }); return; }
+    }
     showError(err && err.code === 'AUTH_FAILED' ? '登入已逾時，請關閉此頁面後重新開啟。' : (err && err.message) || 'LINE 載入失敗，請關閉後重新開啟。');
   });
 })();
