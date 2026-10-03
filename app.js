@@ -238,6 +238,13 @@
 
   function drawClassify(box, d) {
     box.innerHTML = '';
+    if (!d.pendingCount && d.preparingCount) {
+      add(box, add(el('div', { class: 'card empty' }), el('div', { class: 'icon' }, '⏳'), el('h2', {}, '文件整理中，請稍候再開啟此頁'),
+        el('div', { class: 'muted' }, '您傳送的 ' + d.preparingCount + ' 份文件正在整理。上班時段約 2～3 分鐘，其他時間最長約 15～20 分鐘。'),
+        button('重新整理', 'teal', function () { renderClassify(); }),
+        button('回文件中心', 'ghost', function () { renderHome(); })));
+      return;
+    }
     if (!d.pendingCount) {
       add(box, add(el('div', { class: 'card empty' }), el('div', { class: 'icon' }, '✅'), el('h2', {}, '目前沒有需要分類的文件'),
         button('回文件中心', '', function () { renderHome(); })));
@@ -289,7 +296,7 @@
       busy('分類中…');
       api('classify', { itemIds: Object.keys(chosen), companyId: company.value }).then(function (r) {
         idle(); drawClassify(box, r);
-        var done = el('div', { class: 'info' }, '已送出分類，文件會在幾分鐘內整理到公司資料夾。');
+        var done = el('div', { class: 'info' }, '已送出分類。文件整理到公司資料夾，上班時段約 2～3 分鐘，其他時間最長約 15～20 分鐘。');
         box.insertBefore(done, box.firstChild);
       }, function (e) { idle(); go.disabled = false; err.textContent = e.message; });
     });
