@@ -13,6 +13,7 @@
 
   // LIFF 初始化前先保留網址參數（邀請連結的 invite 可能放在 liff.state 內）
   var initialInvite = readInvite(location.href);
+  var initialPage = readParam(location.href, 'page');
 
   /* ---------- 共用 ---------- */
   function $(id) { return document.getElementById(id); }
@@ -28,6 +29,15 @@
   function fmtDate(iso) {
     var d = new Date(iso); if (isNaN(d)) return '';
     return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+  }
+  function readParam(href, name) {
+    try {
+      var q = new URL(href).searchParams;
+      if (q.get(name)) return q.get(name);
+      var st = q.get('liff.state');
+      if (st) { var m = st.match(new RegExp('[?&]' + name + '=([^&]+)')); if (m) return decodeURIComponent(m[1]); }
+    } catch (e) {}
+    return '';
   }
   function readInvite(href) {
     try {
@@ -100,11 +110,17 @@
     $('firm').textContent = s.firmName || '';
     var a = view();
 
+    if (s.unclassifiedCount) {
+      var un = add(el('div', { class: 'card', style: 'border-color:#e8c36a;background:#fffaf0' }),
+        el('div', { style: 'font-weight:700' }, '您有 ' + s.unclassifiedCount + ' 份文件尚未分類'),
+        button('前往分類', 'teal', function () { renderClassify(); }));
+      add(a, un);
+    }
     s.companies.forEach(function (c) {
-      var card = add(el('div', { class: 'card' }), el('div', { class: 'company' }, c.name));
+      var card = add(el('div', { class: 'card tap' }), el('div', { class: 'company' }, c.name));
       if (c.suspended) add(card, el('div', { class: 'muted small' }, '已停止服務，仍可查看歷史文件'));
       add(card, el('div', { class: 'note' }, '下載時請使用 ' + c.maskedEmail + ' 登入 Google（此 Google 帳號即為日後下載文件使用的帳號）'));
-      add(card, el('div', { class: 'info' }, '文件瀏覽與下載功能即將開放。現在您已經可以直接在 LINE 聊天室傳送照片或檔案給我們。'));
+      add(card, button('查看文件', '', function () { renderBrowse(c, ''); }));
       add(a, card);
     });
 
@@ -139,6 +155,178 @@
     }
 
     add(a, el('div', { class: 'foot' }, '如需綁定其他公司、變更 Google 帳號或解除綁定，請聯絡事務所。'));
+  }
+
+  /* ---------- 瀏覽公司資料夾與下載（契約第 1～9 項） ---------- */
+  function fmtSize(n) {
+    if (n === null || n === undefined) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return Math.round(n / 1024) + ' KB';
+    return (n / 1048576).toFixed(1) + ' MB';
+  }
+  function fmtDateTime(iso) {
+    var d = new Date(iso); if (isNaN(d)) return '';
+    var p = function (n) { return ('0' + n).slice(-2); };
+    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  function fileIcon(name) {
+    var e = String(name).split('.').pop().toLowerCase();
+    if (e === 'pdf') return '📕';
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic'].indexOf(e) >= 0) return '🖼️';
+    if (['xls', 'xlsx', 'csv'].indexOf(e) >= 0) return '📗';
+    if (['doc', 'docx'].indexOf(e) >= 0) return '📘';
+    return '📄';
+  }
+
+  function renderBrowse(company, folderId) {
+    setTitle(company.name);
+    var a = view();
+    add(a, button('‹ 回文件中心', 'link', function () { renderHome(); }));
+    var box = add(el('div', { class: 'card' }), el('div', { class: 'muted' }, '載入中…'));
+    add(a, box);
+    api('listFolder', { companyId: company.companyId, folderId: folderId || '' }).then(function (d) {
+      box.innerHTML = '';
+      var head = add(el('div', {}), el('div', { class: 'company' }, d.folder.isRoot ? d.companyName : d.folder.name));
+      if (!d.folder.isRoot) {
+        add(head, button('‹ 回上一層', 'ghost inline', function () { renderBrowse(company, d.folder.parentId); }));
+      }
+      add(box, head);
+      add(box, el('div', { class: 'note' }, '下載時請使用 ' + company.maskedEmail + ' 登入 Google（此 Google 帳號即為日後下載文件使用的帳號）'));
+      if (!d.items.length) add(box, el('div', { class: 'muted', style: 'margin-top:12px' }, '這個資料夾目前沒有文件。'));
+      var list = add(el('div', { class: 'files' }));
+      d.items.forEach(function (it) {
+        var row = el('div', { class: 'frow' });
+        add(row, el('div', { class: 'ficon' }, it.isFolder ? '📁' : fileIcon(it.name)),
+          add(el('div', { class: 'fmain' }), el('div', { class: 'fname' }, it.name),
+            el('div', { class: 'muted small' }, it.isFolder ? '資料夾' : [fmtDateTime(it.modifiedTime), fmtSize(it.size)].filter(String).join('　'))));
+        row.onclick = function () { it.isFolder ? renderBrowse(company, it.id) : openFile(company, it); };
+        add(list, row);
+      });
+      add(box, list);
+      if (d.truncated) add(box, el('div', { class: 'muted small', style: 'margin-top:8px' }, '文件較多，僅顯示前 300 筆。'));
+    }, function (e) {
+      box.innerHTML = '';
+      add(box, el('div', { class: 'err' }, e.message));
+      add(box, button('重新整理', 'ghost inline', function () { renderBrowse(company, folderId); }));
+    });
+  }
+
+  /** 契約第 5 項：LINE 內以外部瀏覽器開啟；外部瀏覽器則先同步開新分頁再設定網址（避免被封鎖） */
+  function openFile(company, it) {
+    var win = null;
+    if (!liff.isInClient()) { try { win = window.open('about:blank', '_blank'); } catch (e) {} }
+    busy('取得文件連結…');
+    api('getFileUrl', { companyId: company.companyId, fileId: it.id }).then(function (r) {
+      idle();
+      if (liff.isInClient()) liff.openWindow({ url: r.url, external: true });
+      else if (win) win.location.href = r.url;
+      else window.open(r.url, '_blank');
+    }, function (e) { idle(); if (win) win.close(); alert(e.message); });
+  }
+
+  /* ---------- 文件分類（9.5） ---------- */
+  function renderClassify() {
+    setTitle('文件分類');
+    var a = view();
+    add(a, button('‹ 回文件中心', 'link', function () { renderHome(); }));
+    var box = add(el('div', {}), add(el('div', { class: 'card' }), el('div', { class: 'muted' }, '載入中…')));
+    add(a, box);
+    api('getClassify', {}).then(function (d) { drawClassify(box, d); }, function (e) {
+      box.innerHTML = ''; add(box, add(el('div', { class: 'card' }), el('div', { class: 'err' }, e.message)));
+    });
+  }
+
+  function drawClassify(box, d) {
+    box.innerHTML = '';
+    if (!d.pendingCount) {
+      add(box, add(el('div', { class: 'card empty' }), el('div', { class: 'icon' }, '✅'), el('h2', {}, '目前沒有需要分類的文件'),
+        button('回文件中心', '', function () { renderHome(); })));
+      return;
+    }
+    if (!d.companies.length) {
+      add(box, add(el('div', { class: 'card' }), el('div', { class: 'note' }, '目前沒有可用的公司綁定，請重新綁定後再分類。如有疑問請聯絡事務所。')));
+      return;
+    }
+    var chosen = {}; // itemId → true
+    var company = { value: '' };
+    if (d.companies.length === 1) company.value = d.companies[0].companyId;
+
+    add(box, add(el('div', { class: 'card' }), el('h2', {}, '請選擇每份文件屬於哪一家公司'),
+      el('div', { class: 'muted' }, '勾選文件後，選擇公司並按「確認分類」。也可以只分類一部分，其餘稍後再處理。')));
+    if (d.notReadyCount) add(box, el('div', { class: 'note' }, '有 ' + d.notReadyCount + ' 份文件整理中，請稍候再開啟此頁。（上班時段約 2～3 分鐘）'));
+
+    var all = [];
+    d.batches.forEach(function (b) {
+      var card = add(el('div', { class: 'card' }), el('div', { class: 'muted small' }, fmtDateTime(b.createdAt) + ' 收到'));
+      b.items.forEach(function (it) {
+        var lb = el('label', { class: 'frow pick' });
+        var cb = el('input', { type: 'checkbox' }); cb.disabled = !it.ready;
+        cb.onchange = function () { if (cb.checked) chosen[it.itemId] = true; else delete chosen[it.itemId]; sync(); };
+        all.push({ cb: cb, it: it });
+        add(lb, cb, add(el('div', { class: 'fmain' }),
+          el('div', { class: 'fname' }, '第 ' + it.seq + ' 份　' + (it.fileName || '照片')),
+          el('div', { class: 'muted small' }, it.ready ? fmtDateTime(it.receivedAt) + ' 收到' : '文件整理中，請稍候再開啟此頁')));
+        add(card, lb);
+      });
+      var bar = add(el('div', { style: 'margin-top:8px' }));
+      add(bar, button('取消這批文件', 'link', function () {
+        if (!confirm('確定取消這批文件？尚未分類的文件會被移除，之後需要請重新傳送。')) return;
+        busy('取消中…');
+        api('cancelBatch', { batchId: b.batchId }).then(function (r) { idle(); drawClassify(box, r); }, function (e) { idle(); alert(e.message); });
+      }));
+      add(box, card);
+    });
+
+    var pick = add(el('div', { class: 'card' }), el('label', { class: 'lbl', style: 'margin-top:0' }, '這些文件屬於'));
+    var sel = el('select', { class: 'in', style: 'font-size:17px' });
+    add(sel, el('option', { value: '' }, '請選擇公司'));
+    d.companies.forEach(function (c) { add(sel, el('option', { value: c.companyId }, c.name)); });
+    sel.value = company.value;
+    sel.onchange = function () { company.value = sel.value; sync(); };
+    var err = el('div', { class: 'err' });
+    var go = button('確認分類', 'teal', function () {
+      go.disabled = true; err.textContent = '';
+      busy('分類中…');
+      api('classify', { itemIds: Object.keys(chosen), companyId: company.value }).then(function (r) {
+        idle(); drawClassify(box, r);
+        var done = el('div', { class: 'info' }, '已送出分類，文件會在幾分鐘內整理到公司資料夾。');
+        box.insertBefore(done, box.firstChild);
+      }, function (e) { idle(); go.disabled = false; err.textContent = e.message; });
+    });
+    var selAll = button('全選可分類的文件', 'ghost', function () {
+      all.forEach(function (x) { if (!x.cb.disabled) { x.cb.checked = true; chosen[x.it.itemId] = true; } }); sync();
+    });
+    function sync() { go.disabled = !(company.value && Object.keys(chosen).length); go.textContent = '確認分類' + (Object.keys(chosen).length ? '（' + Object.keys(chosen).length + ' 份）' : ''); }
+    add(pick, sel, selAll, err, go);
+    add(box, pick);
+    sync();
+  }
+
+  /* ---------- 使用說明（18.2；不需登入） ---------- */
+  function renderGuide(info) {
+    setTitle('使用說明');
+    var a = view();
+    var mb = info && info.MaxInboundFileSizeBytes ? Math.round(info.MaxInboundFileSizeBytes / 1048576) : 50;
+    var sections = [
+      ['📤 如何傳送文件', '直接在本聊天室傳送照片或檔案（例如 PDF），可以一次傳好幾份。傳送後會收到「已收到您傳送的文件」。\n影片與語音無法自動處理，請改傳照片或檔案，或聯絡事務所。\n單一檔案大小上限約 ' + mb + 'MB。'],
+      ['🗂️ 如何分類文件（綁定多家公司的客戶）', '傳送後的回覆訊息會附「點此分類文件」按鈕，點開後為每份文件選擇所屬公司。\n上班時段文件整理約需 2～3 分鐘，下班時間最長約 15～20 分鐘；若畫面顯示「文件整理中」，請稍後再開啟。\n也可以從「文件中心」上方的未分類提示進入。'],
+      ['📥 如何查看與下載文件', '點選單的「文件中心」→ 選擇公司與資料夾 → 點選檔案。下載時會開啟手機瀏覽器並進入 Google 頁面。'],
+      ['🔑 下載時要用哪個 Google 帳號', '必須使用綁定時填寫的 Google 帳號（文件中心上方有顯示）。如果瀏覽器登入的是其他帳號，會看到需要存取權的畫面，請切換為綁定的帳號。'],
+      ['🔐 看到 Google 登入畫面怎麼辦', '這是 Google 官方的登入頁面，請登入綁定的 Google 帳號。本系統不會在 LINE 內要求您輸入 Google 密碼。'],
+      ['🏢 如何綁定公司、變更帳號或解除綁定', '首次使用請於文件中心點「綁定公司」並輸入統一編號。綁定其他公司，請聯絡事務所取得邀請連結。變更 Google 帳號或解除綁定，也請聯絡事務所。']
+    ];
+    sections.forEach(function (s) {
+      var card = add(el('div', { class: 'card' }), el('h2', {}, s[0]));
+      s[1].split('\n').forEach(function (line) { add(card, el('p', { style: 'margin:6px 0' }, line)); });
+      add(a, card);
+    });
+    if (info && info.FirmName) {
+      var c = add(el('div', { class: 'card' }), el('h2', {}, '☎️ 聯絡' + info.FirmName));
+      [['電話', info.FirmPhone], ['地址', info.FirmAddress], ['服務時間', info.FirmServiceHours]].forEach(function (r) {
+        if (r[1]) add(c, el('p', { style: 'margin:6px 0' }, r[0] + '：' + r[1]));
+      });
+      add(a, c);
+    }
   }
 
   /* ---------- 綁定流程：統編 → 公司名稱 → Google 帳號 → 確認（5.1、5.5） ---------- */
@@ -279,13 +467,21 @@
 
   liff.init({ liffId: C.LIFF_ID }).then(function () {
     clearTimeout(initTimeout);
+    var page = readParam(location.href, 'page') || initialPage;
+    // 18.2：使用說明不需登入即可閱讀
+    if (page === 'guide') {
+      clearTimeout(slow);
+      return raw('getPublicInfo', {}).then(function (info) { $('firm').textContent = info.FirmName || ''; renderGuide(info); },
+        function () { renderGuide(null); });
+    }
     if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
     invite = readInvite(location.href) || initialInvite;
-    if (invite) history.replaceState({}, '', location.pathname);
+    if (invite || page) history.replaceState({}, '', location.pathname);
     return login().then(function (d) {
       clearTimeout(slow);
       $('firm').textContent = d.status.firmName || '';
       if (d.invite) return handleInvite(d.invite);
+      if (page === 'classify') return renderClassify();
       renderHome();
     });
   }).then(null, function (err) {

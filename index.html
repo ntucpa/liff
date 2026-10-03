@@ -47,6 +47,13 @@
     @keyframes spin { to { transform:rotate(360deg); } }
     #busy { position:fixed; inset:0; background:rgba(243,245,248,.85); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:10; color:var(--navy); }
     #busy .spin { margin:0 0 12px; }
+    .files { margin-top:10px; }
+    .frow { display:flex; align-items:center; gap:12px; padding:12px 4px; border-bottom:1px solid var(--line); cursor:pointer; }
+    .frow:last-child { border-bottom:0; }
+    .frow.pick { cursor:default; } .frow.pick input { width:22px; height:22px; flex-shrink:0; }
+    .ficon { font-size:26px; width:32px; text-align:center; flex-shrink:0; }
+    .fmain { min-width:0; flex:1; } .fname { word-break:break-all; font-size:16px; }
+    select.in { background:#fff; }
     .hidden { display:none !important; }
   </style>
 </head>
@@ -61,7 +68,7 @@
   <div id="busy" class="hidden"><div class="spin"></div><div id="busyText">處理中…</div></div>
 
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <script src="config.js?v=0.6.0"></script>
-  <script src="app.js?v=0.6.0"></script>
+  <script src="config.js?v=0.7.1"></script>
+  <script src="app.js?v=0.7.1"></script>
 </body>
 </html>
