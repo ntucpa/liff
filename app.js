@@ -196,7 +196,14 @@
       var list = add(el('div', { class: 'files' }));
       d.items.forEach(function (it) {
         var row = el('div', { class: 'frow' });
-        add(row, el('div', { class: 'ficon' }, it.isFolder ? '📁' : fileIcon(it.name)),
+        var icon = el('div', { class: 'ficon' }, it.isFolder ? '📁' : fileIcon(it.name));
+        if (it.thumb) { // 縮圖載入失敗（過期或被擋）時自動換回圖示
+          var img = el('img', { src: it.thumb, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' });
+          img.onerror = function () { icon.textContent = fileIcon(it.name); };
+          icon.textContent = '';
+          icon.appendChild(img);
+        }
+        add(row, icon,
           add(el('div', { class: 'fmain' }), el('div', { class: 'fname' }, it.name),
             el('div', { class: 'muted small' }, it.isFolder ? '資料夾' : [fmtDateTime(it.modifiedTime), fmtSize(it.size)].filter(String).join('　'))));
         row.onclick = function () { it.isFolder ? renderBrowse(company, it.id) : openFile(company, it); };

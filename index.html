@@ -51,7 +51,8 @@
     .frow { display:flex; align-items:center; gap:12px; padding:12px 4px; border-bottom:1px solid var(--line); cursor:pointer; }
     .frow:last-child { border-bottom:0; }
     .frow.pick { cursor:default; } .frow.pick input { width:22px; height:22px; flex-shrink:0; }
-    .ficon { font-size:26px; width:32px; text-align:center; flex-shrink:0; }
+    .ficon { font-size:26px; width:40px; text-align:center; flex-shrink:0; }
+    .ficon img { width:40px; height:40px; object-fit:cover; border-radius:6px; background:#eef2f6; display:block; }
     .fmain { min-width:0; flex:1; } .fname { word-break:break-all; font-size:16px; }
     select.in { background:#fff; }
     .hidden { display:none !important; }
@@ -68,7 +69,7 @@
   <div id="busy" class="hidden"><div class="spin"></div><div id="busyText">處理中…</div></div>
 
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <script src="config.js?v=0.8.0"></script>
-  <script src="app.js?v=0.8.0"></script>
+  <script src="config.js?v=0.8.2"></script>
+  <script src="app.js?v=0.8.2"></script>
 </body>
 </html>
