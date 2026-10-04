@@ -178,6 +178,8 @@
     return '📄';
   }
 
+  var browseHelp = null;
+  var browseHelp = null;
   function renderBrowse(company, folderId) {
     setTitle(company.name);
     var a = view();
@@ -192,6 +194,18 @@
       }
       add(box, head);
       add(box, el('div', { class: 'note' }, '下載時請使用 ' + company.maskedEmail + ' 登入 Google（此 Google 帳號即為日後下載文件使用的帳號）'));
+      // 多帳號說明：出現 403 或「需要存取權」時的處理步驟（點檔案後會自動展開）
+      browseHelp = el('details', { class: 'muted small', style: 'margin-top:8px' });
+      add(browseHelp, el('summary', { style: 'cursor:pointer' }, '下載時出現 403 或「需要存取權」？'),
+        el('div', { style: 'margin-top:6px;line-height:1.7' }, '代表手機目前登入的是別的 Google 帳號，不是檔案有問題。請依序：'),
+        el('div', { style: 'line-height:1.7' }, '1. 用手機瀏覽器（iPhone 用 Safari，Android 用 Chrome）開啟 Google 登入頁。'),
+        el('div', { style: 'line-height:1.7' }, '2. 登入或切換成 ' + company.maskedEmail + '。'),
+        el('div', { style: 'line-height:1.7' }, '3. 回到這裡再點一次檔案。'),
+        button('開啟 Google 登入頁', 'ghost inline', function () {
+          var u = 'https://accounts.google.com';
+          if (liff.isInClient()) liff.openWindow({ url: u, external: true }); else window.open(u, '_blank');
+        }));
+      add(box, browseHelp);
       if (!d.items.length) add(box, el('div', { class: 'muted', style: 'margin-top:12px' }, '這個資料夾目前沒有文件。'));
       var list = add(el('div', { class: 'files' }));
       d.items.forEach(function (it) {
@@ -225,6 +239,7 @@
     busy('取得文件連結…');
     api('getFileUrl', { companyId: company.companyId, fileId: it.id }).then(function (r) {
       idle();
+      if (browseHelp) browseHelp.open = true; // 回到文件中心時，若開啟後出現 403，可直接看到處理步驟
       if (liff.isInClient()) liff.openWindow({ url: r.url, external: true });
       else if (win) win.location.href = r.url;
       else window.open(r.url, '_blank');
