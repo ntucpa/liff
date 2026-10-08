@@ -96,17 +96,23 @@
     return p;
   }
 
-  /** 快速通道：向 Cloudflare 要首頁狀態（比 Apps Script 快很多）。任何失敗或回「不確定」都回傳 null，由原本的登入流程處理 */
-  function fastStatus() {
+  /** 快速通道：向 Cloudflare 問（比 Apps Script 快很多）。回傳 { ok, data } 或 { ok:false, error }；連線失敗或回「不確定」(FALLBACK) 一律回 null，由原本的流程處理 */
+  function fast(action, extra) {
     var idToken = liff.getIDToken();
     if (!C.FAST_URL || !idToken) return Promise.resolve(null);
     var ctl = window.AbortController ? new AbortController() : null;
     var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 6000);
     return fetch(C.FAST_URL, {
       method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, signal: ctl ? ctl.signal : undefined,
-      body: JSON.stringify({ action: 'loginFast', idToken: idToken })
-    }).then(function (r) { return r.json(); }).then(function (r) { clearTimeout(timer); return r && r.ok && r.data && r.data.status ? r.data : null; }, function () { clearTimeout(timer); return null; });
+      body: JSON.stringify(Object.assign({ action: action, idToken: idToken }, extra || {}))
+    }).then(function (r) { return r.json(); }).then(function (r) {
+      clearTimeout(timer);
+      if (r && r.ok && r.data) return r;
+      if (r && r.error && r.error.code && r.error.code !== 'FALLBACK' && r.error.code !== 'BAD_REQUEST') return r;
+      return null;
+    }, function () { clearTimeout(timer); return null; });
   }
+  function fastStatus() { return fast('loginFast').then(function (r) { return r && r.ok && r.data.status ? r.data : null; }); }
 
   /** 需登入之動作：Session 逾時時自動重新登入後再試一次（AC-98） */
   function api(action, data) {
@@ -402,7 +408,11 @@
       if (v.length !== 8) { err.textContent = '請輸入 8 碼統一編號'; return; }
       next.disabled = true; err.textContent = '';
       busy('查詢中…');
-      api('lookupTaxId', { taxId: v }).then(function (d) {
+      fast('lookupTaxIdFast', { taxId: v }).then(function (f) {
+        if (f && f.ok) return f.data;
+        if (f) throw f.error; // 規則不符（格式、已綁定、查無公司…）：直接顯示原因
+        return api('lookupTaxId', { taxId: v });
+      }).then(function (d) {
         idle();
         renderEmail({ companyId: d.companyId, companyName: d.companyName, email: d.suggestedEmail, typoMap: d.typoMap, hasPending: d.hasPending });
       }, function (e) { idle(); next.disabled = false; err.textContent = e.message; });
@@ -557,8 +567,15 @@
     if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
     invite = readInvite(location.href) || initialInvite;
     if (invite || page) history.replaceState({}, '', location.pathname);
-    var gasDone = false;
-    if (!invite && !page) {
+    var gasDone = false, inviteShown = false;
+    if (invite) {
+      // 邀請連結：同時問快速通道，先顯示填 Email 的畫面；Apps Script 登入在背景完成，送出時才需要
+      fast('loginFast', { invite: invite }).then(function (f) {
+        if (!f || !f.ok || !f.data.invite || gasDone) return;
+        if (f.data.oaUrl) oaUrl = f.data.oaUrl;
+        clearTimeout(slow); inviteShown = true; handleInvite(f.data.invite);
+      });
+    } else if (!page) {
       // 同時問快速通道：它先回來就先顯示首頁，Apps Script 登入在背景完成（之後按需要 Session 的按鈕會自動等它）
       fastStatus().then(function (f) {
         if (!f || gasDone || (shown && !onHome)) return;
@@ -574,7 +591,7 @@
       clearTimeout(slow);
       try { sessionStorage.removeItem('yc_relogin'); } catch (e) {}
       $('firm').textContent = d.status.firmName || '';
-      if (d.invite) return handleInvite(d.invite);
+      if (d.invite) { if (inviteShown) return; return handleInvite(d.invite); }
       if (page === 'classify') return renderClassify();
       if (shown && !onHome) return; // 使用者已進到別的畫面，不打斷
       if (shown && onHome && JSON.stringify(d.status) === homeJson) return; // 畫面已是最新，不重畫
