@@ -9,6 +9,7 @@
   var C = window.YC_LIFF;
   var session = '';
   var invite = '';
+  var oaUrl = ''; // 官方帳號加入好友連結（登入時由後端提供）
   var state = null; // 文件中心狀態（後端 customerStatus）
 
   // LIFF 初始化前先保留網址參數（邀請連結的 invite 可能放在 liff.state 內）
@@ -83,6 +84,7 @@
     return raw('login', { idToken: idToken, invite: invite }).then(function (d) {
       session = d.sessionToken;
       state = d.status;
+      if (d.oaUrl) oaUrl = d.oaUrl;
       return d;
     });
   }
@@ -391,6 +393,17 @@
     setTimeout(function () { input.focus(); }, 100);
   }
 
+  /** 「請先加入官方帳號」提示卡：已是好友（liff.getFriendship）就不顯示；查不到好友狀態時一律顯示 */
+  function oaCard(text) {
+    if (!oaUrl) return null;
+    var box = el('div', { class: 'card center', style: 'border:2px solid #06C755' });
+    add(box, el('div', { style: 'font-weight:700;margin-bottom:6px' }, '請先加入官方帳號'),
+      el('div', { class: 'muted small', style: 'margin-bottom:8px' }, text || '沒有加入官方帳號，就收不到事務所傳來的通知與訊息，也找不到傳檔的對話。'),
+      button('加入官方帳號', 'teal', function () { try { liff.openWindow({ url: oaUrl, external: false }); } catch (e) { location.href = oaUrl; } }));
+    try { liff.getFriendship().then(function (f) { if (f && f.friendFlag && box.parentNode) box.parentNode.removeChild(box); }, function () { /* 查不到就維持顯示 */ }); } catch (e) { /* 同上 */ }
+    return box;
+  }
+
   /** ctx：{ companyId | invite, companyName, email, typoMap, hasPending } */
   function renderEmail(ctx) {
     setTitle(ctx.invite ? '邀請綁定' : '綁定公司');
@@ -420,7 +433,7 @@
       el('div', { class: 'muted small', style: 'margin-top:6px' }, '請填寫日後要用來下載文件的 Google 帳號（通常是 Gmail）。'),
       err, next, sug,
       button(ctx.invite ? '稍後再說' : '返回', 'link', function () { ctx.invite ? renderHome() : renderTaxId(); }));
-    add(a, card);
+    add(a, oaCard(), card);
   }
 
   function renderConfirm(ctx, email) {
@@ -459,6 +472,7 @@
       el('div', { class: 'big', style: 'font-size:18px' }, email),
       el('div', { class: 'info' }, '審核通過前，系統還無法處理您傳送的文件，請於收到核准通知後再傳送。'),
       button('返回文件中心', '', function () { renderHome(); })));
+    add(a, oaCard('請務必加入官方帳號，審核通過後的通知與請款訊息才會傳到您的 LINE。'));
   }
 
   function renderMessage(message) {
