@@ -112,6 +112,14 @@
       return null;
     }, function () { clearTimeout(timer); return null; });
   }
+  /** 先問快速通道，沒有答案（或不確定）才問 Apps Script */
+  function apiFast(fastAction, gasAction, data) {
+    return fast(fastAction, data).then(function (f) {
+      if (f && f.ok) return f.data;
+      if (f) throw f.error;
+      return api(gasAction, data);
+    });
+  }
   function fastStatus() { return fast('loginFast').then(function (r) { return r && r.ok && r.data.status ? r.data : null; }); }
 
   /** 需登入之動作：Session 逾時時自動重新登入後再試一次（AC-98） */
@@ -217,7 +225,7 @@
     add(a, button('‹ 回文件中心', 'link', function () { renderHome(); }));
     var box = add(el('div', { class: 'card' }), el('div', { class: 'muted' }, '載入中…'));
     add(a, box);
-    api('listFolder', { companyId: company.companyId, folderId: folderId || '' }).then(function (d) {
+    apiFast('listFolderFast', 'listFolder', { companyId: company.companyId, folderId: folderId || '' }).then(function (d) {
       box.innerHTML = '';
       var head = add(el('div', {}), el('div', { class: 'company' }, d.folder.isRoot ? d.companyName : d.folder.name));
       if (!d.folder.isRoot) {
@@ -270,7 +278,7 @@
     var win = null;
     if (!liff.isInClient()) { try { win = window.open('about:blank', '_blank'); } catch (e) {} }
     busy('取得文件連結…');
-    api('getFileUrl', { companyId: company.companyId, fileId: it.id }).then(function (r) {
+    apiFast('getFileUrlFast', 'getFileUrl', { companyId: company.companyId, fileId: it.id }).then(function (r) {
       idle();
       if (browseHelp) browseHelp.open = true; // 回到文件中心時，若開啟後出現 403，可直接看到處理步驟
       if (liff.isInClient()) liff.openWindow({ url: r.url, external: true });
