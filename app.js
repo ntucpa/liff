@@ -112,6 +112,14 @@
       return null;
     }, function () { clearTimeout(timer); return null; });
   }
+  /** 只讀動作的重試：連線不穩（NETWORK）時間隔 1.5 秒再試，最多 tries 次 */
+  function apiRetry(action, data, tries) {
+    return api(action, data).then(null, function (e) {
+      if (!e || e.code !== 'NETWORK' || tries <= 1) throw e;
+      return new Promise(function (r) { setTimeout(r, 1500); }).then(function () { return apiRetry(action, data, tries - 1); });
+    });
+  }
+
   /** 先問快速通道，沒有答案（或不確定）才問 Apps Script */
   function apiFast(fastAction, gasAction, data) {
     return fast(fastAction, data).then(function (f) {
@@ -294,7 +302,7 @@
     add(a, button('‹ 回文件中心', 'link', function () { renderHome(); }));
     var box = add(el('div', {}), add(el('div', { class: 'card' }), el('div', { class: 'muted' }, '載入中…')));
     add(a, box);
-    api('getClassify', {}).then(function (d) { drawClassify(box, d); }, function (e) {
+    apiRetry('getClassify', {}, 3).then(function (d) { drawClassify(box, d); }, function (e) {
       box.innerHTML = ''; add(box, add(el('div', { class: 'card' }), el('div', { class: 'err' }, e.message)));
     });
   }
@@ -361,7 +369,21 @@
         idle(); drawClassify(box, r);
         var done = el('div', { class: 'info' }, '已送出分類。文件整理到公司資料夾，上班時段約 2～3 分鐘，其他時間最長約 15～20 分鐘。');
         box.insertBefore(done, box.firstChild);
-      }, function (e) { idle(); go.disabled = false; err.textContent = e.message; });
+      }, function (e) {
+        if (e && e.code === 'NETWORK') {
+          // 連線中斷時不確定有沒有送成功：重新讀一次，選的文件都已不在待分類就算成功
+          busy('確認結果中…');
+          return apiRetry('getClassify', {}, 3).then(function (r) {
+            idle();
+            var left = {}; (r.batches || []).forEach(function (b) { b.items.forEach(function (i) { left[i.itemId] = true; }); });
+            var stillThere = Object.keys(chosen).some(function (id) { return left[id]; });
+            drawClassify(box, r);
+            if (!stillThere) box.insertBefore(el('div', { class: 'info' }, '已送出分類。文件整理到公司資料夾，上班時段約 2～3 分鐘，其他時間最長約 15～20 分鐘。'), box.firstChild);
+            else { go.disabled = false; box.insertBefore(el('div', { class: 'note' }, '網路不穩，這次沒有送出。請再按一次「確認分類」。'), box.firstChild); }
+          }, function () { idle(); go.disabled = false; err.textContent = '網路連線不穩定，無法確認是否已送出。請稍等幾秒，重新開啟此頁查看。'; });
+        }
+        idle(); go.disabled = false; err.textContent = e.message;
+      });
     });
     var selAll = button('全選可分類的文件', 'ghost', function () {
       all.forEach(function (x) { if (!x.cb.disabled) { x.cb.checked = true; chosen[x.it.itemId] = true; } }); sync();
@@ -490,7 +512,19 @@
         if (ctx.invite) invite = '';
         if (d.submitted) return renderDone(ctx, email);
         renderMessage(d.invite && d.invite.message);
-      }, function (e) { idle(); ok.disabled = false; err.textContent = e.message; });
+      }, function (e) {
+        if (e && e.code === 'NETWORK') {
+          // 連線中斷時不確定有沒有送成功：查一次狀態，已出現這家公司的審核中申請就算成功
+          busy('確認結果中…');
+          return apiRetry('getStatus', {}, 3).then(function (st) {
+            idle();
+            var hit = (st.pending || []).some(function (p) { return p.name === ctx.companyName; });
+            if (hit) { state = st; if (ctx.invite) invite = ''; return renderDone(ctx, email); }
+            ok.disabled = false; err.textContent = '網路不穩，這次沒有送出。請再按一次「確認送出」。';
+          }, function () { idle(); ok.disabled = false; err.textContent = '網路連線不穩定，無法確認是否已送出。請稍等幾秒再按一次「確認送出」；若已送出過，系統會告訴您。'; });
+        }
+        idle(); ok.disabled = false; err.textContent = e.message;
+      });
     });
     add(a, add(el('div', { class: 'card' }), steps(3),
       el('h2', {}, '請確認以下資料'),
