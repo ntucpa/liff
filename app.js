@@ -154,6 +154,7 @@
         add(empty, button('綁定公司', 'teal', function () { renderTaxId(); }));
       }
       add(a, empty);
+      add(a, oaCard('沒有加入官方帳號，就收不到事務所傳來的通知與訊息。'));
     }
 
     add(a, el('div', { class: 'foot' }, '如需綁定其他公司、變更 Google 帳號或解除綁定，請聯絡事務所。'));
