@@ -11,6 +11,7 @@
   var invite = '';
   var oaUrl = ''; // 官方帳號加入好友連結（登入時由後端提供）
   var state = null; // 文件中心狀態（後端 customerStatus）
+  var homeJson = ''; // 目前畫面所用的首頁狀態
   var onHome = false; // 目前畫面是否為文件中心首頁
   var loginP = null; // 進行中的登入（先顯示上次畫面時，動作要等它完成）
   var CACHE_KEY = 'yc_home_v1';
@@ -95,6 +96,18 @@
     return p;
   }
 
+  /** 快速通道：向 Cloudflare 要首頁狀態（比 Apps Script 快很多）。任何失敗或回「不確定」都回傳 null，由原本的登入流程處理 */
+  function fastStatus() {
+    var idToken = liff.getIDToken();
+    if (!C.FAST_URL || !idToken) return Promise.resolve(null);
+    var ctl = window.AbortController ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 6000);
+    return fetch(C.FAST_URL, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, signal: ctl ? ctl.signal : undefined,
+      body: JSON.stringify({ action: 'loginFast', idToken: idToken })
+    }).then(function (r) { return r.json(); }).then(function (r) { clearTimeout(timer); return r && r.ok && r.data && r.data.status ? r.data : null; }, function () { clearTimeout(timer); return null; });
+  }
+
   /** 需登入之動作：Session 逾時時自動重新登入後再試一次（AC-98） */
   function api(action, data) {
     var first = session ? Promise.resolve() : (loginP || Promise.resolve());
@@ -116,6 +129,7 @@
   function renderHome() {
     setTitle('文件中心');
     var s = state;
+    homeJson = JSON.stringify(s);
     $('firm').textContent = s.firmName || '';
     var a = view();
     onHome = true;
@@ -543,13 +557,27 @@
     if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
     invite = readInvite(location.href) || initialInvite;
     if (invite || page) history.replaceState({}, '', location.pathname);
+    var gasDone = false;
+    if (!invite && !page) {
+      // 同時問快速通道：它先回來就先顯示首頁，Apps Script 登入在背景完成（之後按需要 Session 的按鈕會自動等它）
+      fastStatus().then(function (f) {
+        if (!f || gasDone || (shown && !onHome)) return;
+        var changed = JSON.stringify(f.status) !== JSON.stringify(state);
+        state = f.status; if (f.oaUrl) oaUrl = f.oaUrl;
+        clearTimeout(slow);
+        if (changed || !shown) { renderHome(); shown = true; }
+        try { localStorage.setItem(CACHE_KEY, JSON.stringify({ state: f.status, oaUrl: f.oaUrl || '' })); } catch (e) {}
+      });
+    }
     return login().then(function (d) {
+      gasDone = true;
       clearTimeout(slow);
       try { sessionStorage.removeItem('yc_relogin'); } catch (e) {}
       $('firm').textContent = d.status.firmName || '';
       if (d.invite) return handleInvite(d.invite);
       if (page === 'classify') return renderClassify();
       if (shown && !onHome) return; // 使用者已進到別的畫面，不打斷
+      if (shown && onHome && JSON.stringify(d.status) === homeJson) return; // 畫面已是最新，不重畫
       renderHome();
     });
   }).then(null, function (err) {
