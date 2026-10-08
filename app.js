@@ -11,6 +11,9 @@
   var invite = '';
   var oaUrl = ''; // 官方帳號加入好友連結（登入時由後端提供）
   var state = null; // 文件中心狀態（後端 customerStatus）
+  var onHome = false; // 目前畫面是否為文件中心首頁
+  var loginP = null; // 進行中的登入（先顯示上次畫面時，動作要等它完成）
+  var CACHE_KEY = 'yc_home_v1';
 
   // LIFF 初始化前先保留網址參數（邀請連結的 invite 可能放在 liff.state 內）
   var initialInvite = readInvite(location.href);
@@ -26,7 +29,7 @@
   }
   function add(parent) { for (var i = 1; i < arguments.length; i++) if (arguments[i]) parent.appendChild(arguments[i]); return parent; }
   function button(text, cls, onClick) { var b = el('button', { class: 'btn ' + (cls || ''), type: 'button' }, text); b.onclick = onClick; return b; }
-  function view() { var a = $('app'); a.innerHTML = ''; window.scrollTo(0, 0); return a; }
+  function view() { var a = $('app'); a.innerHTML = ''; window.scrollTo(0, 0); onHome = false; return a; }
   function fmtDate(iso) {
     var d = new Date(iso); if (isNaN(d)) return '';
     return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
@@ -81,17 +84,21 @@
   function login() {
     var idToken = liff.getIDToken();
     if (!idToken) return Promise.reject({ code: 'AUTH_FAILED', message: '無法取得 LINE 登入資訊，請關閉後重新開啟。' });
-    return raw('login', { idToken: idToken, invite: invite }).then(function (d) {
+    var p = raw('login', { idToken: idToken, invite: invite }).then(function (d) {
       session = d.sessionToken;
       state = d.status;
       if (d.oaUrl) oaUrl = d.oaUrl;
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify({ state: d.status, oaUrl: d.oaUrl || '' })); } catch (e) {}
       return d;
     });
+    loginP = p.then(function () {}, function () {});
+    return p;
   }
 
   /** 需登入之動作：Session 逾時時自動重新登入後再試一次（AC-98） */
   function api(action, data) {
-    return raw(action, Object.assign({ sessionToken: session }, data || {})).then(null, function (err) {
+    var first = session ? Promise.resolve() : (loginP || Promise.resolve());
+    return first.then(function () { return raw(action, Object.assign({ sessionToken: session }, data || {})); }).then(null, function (err) {
       if (err.code !== 'SESSION_EXPIRED') throw err;
       return login().then(function () { return raw(action, Object.assign({ sessionToken: session }, data || {})); });
     });
@@ -111,6 +118,7 @@
     var s = state;
     $('firm').textContent = s.firmName || '';
     var a = view();
+    onHome = true;
 
     if (s.unclassifiedCount) {
       var un = add(el('div', { class: 'card', style: 'border-color:#e8c36a;background:#fffaf0' }),
@@ -511,6 +519,18 @@
   var slow = setTimeout(function () { var t = $('loadingText'); if (t) t.textContent = '連線較慢，請稍候…'; }, 8000);
   var initTimeout = setTimeout(function () { showError('LINE 載入逾時，請關閉後重新開啟。'); }, 20000);
 
+  // 先用上次的畫面：一打開就顯示文件中心（背景再登入更新），不用等後端回應
+  var shown = false;
+  if (!initialInvite && !initialPage) {
+    try {
+      var cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+      if (cached && cached.state && cached.state.companies) {
+        state = cached.state; if (cached.oaUrl) oaUrl = cached.oaUrl;
+        renderHome(); shown = true;
+      }
+    } catch (e) {}
+  }
+
   liff.init({ liffId: C.LIFF_ID }).then(function () {
     clearTimeout(initTimeout);
     var page = readParam(location.href, 'page') || initialPage;
@@ -529,6 +549,7 @@
       $('firm').textContent = d.status.firmName || '';
       if (d.invite) return handleInvite(d.invite);
       if (page === 'classify') return renderClassify();
+      if (shown && !onHome) return; // 使用者已進到別的畫面，不打斷
       renderHome();
     });
   }).then(null, function (err) {
