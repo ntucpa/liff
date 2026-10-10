@@ -19,6 +19,7 @@
   // LIFF 初始化前先保留網址參數（邀請連結的 invite 可能放在 liff.state 內）
   var initialInvite = readInvite(location.href);
   var initialPage = readParam(location.href, 'page');
+  var initialSlip = readParam(location.href, 'slip'); // 請款通知的〔查看繳款書〕：帶申報列編號
 
   /* ---------- 共用 ---------- */
   function $(id) { return document.getElementById(id); }
@@ -145,6 +146,41 @@
       el('div', { style: 'font-size:36px' }, '⚠️'),
       el('p', {}, message || '系統忙碌中，請稍後再試'),
       button('重新整理', '', function () { location.reload(); })));
+  }
+
+  /* ---------- 自繳繳款書（請款通知的〔查看繳款書〕）：閘道驗證身分後給簽章連結，PDF 由閘道直接送出 ---------- */
+  function openSlip(filingId) {
+    var a = view();
+    add(a, add(el('div', { class: 'card center' }), el('div', { style: 'font-size:36px' }, '📄'), el('p', {}, '正在確認身分並取得繳款書…')));
+    var idToken = liff.getIDToken();
+    var ctl = window.AbortController ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 15000);
+    return fetch(C.SLIP_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, signal: ctl ? ctl.signal : undefined, body: JSON.stringify({ idToken: idToken, filingId: filingId }) })
+      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        clearTimeout(timer);
+        if (!r || !r.ok) throw (r && r.error) || { message: '暫時無法開啟，請稍後再試' };
+        var d = r.data, v = view();
+        setTitle('營業稅繳款書');
+        var money = String(d.amount).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        add(v, add(el('div', { class: 'card center' }),
+          el('div', { style: 'font-size:36px' }, '📄'),
+          el('p', { style: 'font-weight:600;margin:6px 0' }, d.companyName || '營業稅繳款書'),
+          el('p', { class: 'muted', style: 'margin:2px 0' }, d.periodLabel + ' 營業稅'),
+          el('p', { style: 'margin:2px 0' }, '應繳稅額 ' + money + ' 元'),
+          el('p', { style: 'margin:2px 0 14px' }, '繳納期限 ' + d.dueDate.replace(/-/g, '/')),
+          button('開啟繳款書', '', function () { location.href = d.url; }),
+          el('div', { style: 'height:8px' }),
+          button('用瀏覽器開啟（手機打不開時用）', 'ghost', function () { try { liff.openWindow({ url: d.url, external: true }); } catch (e) { location.href = d.url; } }),
+          el('p', { class: 'muted', style: 'margin-top:12px;font-size:13px' }, '連結 10 分鐘內有效，過期請回到 LINE 重新按「查看繳款書」。繳完請回請款通知按「我已繳稅」。')));
+      })
+      .then(null, function (e) {
+        clearTimeout(timer);
+        var v = view();
+        add(v, add(el('div', { class: 'card center' }), el('div', { style: 'font-size:36px' }, '⚠️'),
+          el('p', {}, (e && e.name === 'AbortError') ? '連線逾時，請稍後再試' : ((e && e.message) || '暫時無法開啟，請稍後再試')),
+          button('重新整理', '', function () { location.reload(); })));
+      });
   }
 
   /* ---------- 文件中心（第十八章） ---------- */
@@ -587,7 +623,7 @@
 
   // 先用上次的畫面：一打開就顯示文件中心（背景再登入更新），不用等後端回應
   var shown = false;
-  if (!initialInvite && !initialPage) {
+  if (!initialInvite && !initialPage && !initialSlip) {
     try {
       var cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
       if (cached && cached.state && cached.state.companies) {
@@ -607,6 +643,8 @@
         function () { renderGuide(null); });
     }
     if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
+    var slipId = readParam(location.href, 'slip') || initialSlip;
+    if (slipId) { clearTimeout(slow); history.replaceState({}, '', location.pathname); return openSlip(slipId); }
     invite = readInvite(location.href) || initialInvite;
     if (invite || page) history.replaceState({}, '', location.pathname);
     var gasDone = false, inviteShown = false;
